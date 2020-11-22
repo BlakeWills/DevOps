@@ -36,7 +36,7 @@ $scriptBlock = {
     }
 
     Write-Information "Getting Net Adapter Name"
-    $interfaceAlias = (Get-NetAdapter | Where-Object { $_.Name -like "Ethernet*" }).Name
+    $interfaceAlias = (Get-NetAdapter | Where-Object { $_.Name -like "Ethernet*" } | Sort-Object -Property Name | Select-Object -First 1).Name
     Write-Information "Net Adapter Name: $interfaceAlias"
     
     Write-Information 'Disabling IPV6'
@@ -76,11 +76,8 @@ $ouPath = "OU=Servers,DC=lab1,DC=local"
 $domain = "lab1.local"
 $dnsServers = @("192.168.3.10", "8.8.8.8")
 
-$vms = @(
-    'SBCLUSTERVS01|192.168.3.161',
-    'SBCLUSTERVS02|192.168.3.162',
-    'SBFILEVS01|192.168.3.163'
-)
+#$vms = @('SACLUSTERVS01|192.168.3.20','SACLUSTERVS02|192.168.3.21', 'SAFILEVS01|192.168.3.30')
+$vms = @('SBCLUSTERVS02|192.168.3.121', 'SBFILEVS01|192.168.3.130')
 
 foreach($vm in $vms) {
     $parts = $vm.Split('|');
