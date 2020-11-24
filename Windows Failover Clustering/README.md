@@ -16,6 +16,33 @@ SxCLUSTERVSxx should have multiple physical (or virtual) NICs.
 
 SxFILEVSxx should have a multiple disks for LUNs.
 
+## File Server Configuration
+
+1: Install File-Server and iScsi features
+
+```powershell
+Install-WindowsFeature FS-FileServer,FS-iSCSITarget-Server -IncludeAllSubfeature -IncludeManagementTools -Restart
+```
+
+2: Expose iScsi portal on storage ip address
+
+```powershell
+Set-IscsiTargetServerSetting -IP [managementIp] -Enable $false
+Set-IscsiTargetServerSetting -IP [storageIp] -Enable $true
+
+New-iSCSIServerTarget -TargetName "[targetName]" -InitiatorIds @("IPAddress:[clustervsxxStorageIp]", ...)
+
+# Get the TargetIqn. This is needed to connect to the target from the initiators.
+Get-IscsiServerTarget | select TargetIqn
+```
+
+3: Create iScsi virtual disks and target mapping (LUNs):
+
+```powershell
+New-IscsiVirtualDisk -Path [vhdxPath] -Description "[description]" -Size [size]GB
+Add-IscsiVirtualDiskTargetMapping -TargetName "[targetName]" -Path [vhdxPath]
+```
+
 ## Virtual Machine Configuration
 
 These steps are required if you are following this guide as part of a virtual lab and your cluster nodes are virtual manchines.
@@ -96,33 +123,6 @@ New-IscsiTargetPortal -TargetPortalAddress 10.0.1.101
 Get-IscsiTargetPortal | Update-IscsiTargetPortal
 
 Connect-IscsiTarget -NodeAddress "[targetIqn]" -IsPersistent $true -InitiatorPortalAddress [storageIpAddress] -TargetPortalAddress [fileServerStorageIpAddress]
-```
-
-## File Server Configuration
-
-1: Install File-Server and iScsi features
-
-```powershell
-Install-WindowsFeature FS-FileServer,FS-iSCSITarget-Server -IncludeAllSubfeature -IncludeManagementTools -Restart
-```
-
-2: Expose iScsi portal on storage ip address
-
-```powershell
-Set-IscsiTargetServerSetting -IP [managementIp] -Enable $false
-Set-IscsiTargetServerSetting -IP [storageIp] -Enable $true
-
-New-iSCSIServerTarget -TargetName "[targetName]" -InitiatorIds @("IPAddress:[clustervsxxStorageIp]", ...)
-
-# Get the TargetIqn. This is needed to connect to the target from the initiators.
-Get-IscsiServerTarget | select TargetIqn
-```
-
-3: Create iScsi virtual disks and target mapping (LUNs):
-
-```powershell
-New-IscsiVirtualDisk -Path [vhdxPath] -Description "[description]" -Size [size]GB
-Add-IscsiVirtualDiskTargetMapping -TargetName "[targetName]" -Path [vhdxPath]
 ```
 
 ## Creating the cluster
