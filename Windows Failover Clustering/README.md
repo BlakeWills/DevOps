@@ -293,9 +293,104 @@ Note IV: Ensure you run powershell as a domain administrator rather than a local
 
 Once the test is complete, check the report for errors or warnings.
 
-4: Remove the storage roles to convert the storage back to Available Storage
+## Enable storage replication
+
+1: Remove the storage roles to convert the storage back to Available Storage, then ensure the storage is online at Site A.
 
 ```powershell
+# Remove cluster groups
 Remove-ClusterGroup -Name SITEA -RemoveResources
 Remove-ClusterGroup -Name SITEB -RemoveResources
+
+#Ensure storage is online at Site A
+Move-ClusterSharedVolume -Name SALUN01 -Node SACLUSTERVS01
+Move-ClusterGroup -Name "Available Storage" -Node SACLUSTERVS01
+```
+
+2: Enable replication
+
+```powershell
+New-SRPartnership `
+    -SourceComputerName SACLUSTERVS01 `
+    -SourceRGName SARG01 `
+    -SourceVolumeName "C:\ClusterStorage\Volume1" `
+    -SourceLogVolumeName W: `
+    -DestinationComputerName SBCLUSTERVS01 `
+    -DestinationRGName SBRG01 `
+    -DestinationVolumeName X: `
+    -DestinationLogVolumeName Y: `
+    -ReplicationMode Synchronous # Or Asynchronous
+```
+
+Note: The `Source/DestinationRGName` parameter specifies the name of the replication group to create at each side. A replication group is a container for the data and log volumes.
+
+Troubleshooting Tips:
+
+- Ensure the volume names are correct. Move the available storage between sites to confirm (you won't be able to see the site B volume names whilst the storage is owned by site A).
+- Check the cluster log for errors.
+- Ensure your cluster nodes only have internal DNS entries. I've seen this fail when the cluster is unable to register the cluster name resource in DNS, due to the secondary DNS entry pointing to Google's DNS servers.
+- The `New-SRPartnership` cmdlet creates the replication group at each side and then creates the partnership. As a troubleshooting measure, you could manually create the replication groups and then try to configure the partnership yourself, to see which part fails:
+
+```powershell
+New-SRGroup -ComputerName SACLUSTERVS01 -Name "SARG01" -VolumeName C:\ClusterStorage\Volume1 -LogVolumeName 'W:'
+New-SRGroup -ComputerName SBCLUSTERVS01 -Name "SBRG01" -VolumeName 'X:' -LogVolumeName 'Y:'
+
+New-SRPartnership -SourceComputerName SACLUSTERVS01 -SourceRGName SARGS01 -DestinationComputerName SBCLUSTERVS01 -DestinationRGName SBRG01
+```
+
+## Test failover
+
+We have now configured a stretch Windows failover cluster using storage replica. The final thing to do is ensure our failover works as expected.
+
+1: Create a virtual machine using C:\ClusterStorage\Volume1.
+Note: For speed, I created a CentOS 7 VM using the minimal ISO.
+
+2: Turn off our Site A VMs to simulate loss of Site A. This should result in an automatic failover.
+
+- Cluster detects that SACLUSTERVS01 and 02 are down, the nodes are put into the "Isolated" state.
+- VMs will become unmonitored. This is a result of the new resilliency features in Windows 2016 to prevent automatic failovers for transient errors. The default unmonitored period is four minutes.
+- The cluster shared volume will failover and come online at site B using the replica.
+- After four minutes the VMs will failover to the site B hosts.
+
+Note: Testing the failover more than three times within an hour will cause the cluster to quarintine the site A nodes. This mode is designed to protect the cluster from flapping nodes, the cluster will not allow the nodes to re-join for a default of 2 hours. You can override this and clear the quarantine status by running:
+
+```powershell
+Start-ClusterNode -Name [nodeName] -ClearQuarantine
+```
+
+## Failing back
+
+Once we have tested the failover, we want to recover the cluster roles to our prefferred site. Bringing the site A nodes back online will add them back into the cluster, but the cluster roles and storage must be manually failed back.
+
+1: Power on the site A nodes.
+
+2: Check the roles and storage are back online.
+
+```powershell
+# State should be 'Up' for all nodes.
+Get-ClusterNode
+
+# Check the CSV is online at the failover site
+Get-ClusterSharedVolume
+
+# Check the replica volumes are online at the prefferred site
+Get-ClusterResource     # This will tell you which group they belong too, in our case it should be 'SR Group 1'
+Get-ClusterGroup        # This will tell you who owns 'SR Group 1'. It should be one of the nodes in the prefferred site.
+```
+
+3: Reverse the replication to bring the storage back to the prefferred site
+
+```powershell
+Set-SRPartnership -NewSourceComputerName SACLUSTERVS01 -SourceRGName SARG01 -DestinationComputerName SBCLUSTERVS01 -DestinationRGName SBRG01
+
+# Check the CSVs are now at the prefferred site
+Get-ClusterSharedVolume
+```
+
+4: Fail our roles back over to the prefferred site
+
+Note: Depending on your failback configuration, you may have to do this manually.
+
+```powershell
+Move-ClusterVirtualMachineRole -Name LINUX01 -Node SACLUSTERVS01 -MigrationType Live
 ```
